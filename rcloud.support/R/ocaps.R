@@ -74,9 +74,7 @@ compute.ocaps <- function(mode, authenticated) {
         load_notebook = if (authenticated) make.oc(rcloud.load.notebook.compute) else make.oc(rcloud.unauthenticated.load.notebook.compute),
         render_plot = make.oc(rcloud.render.plot),
         render_formats = make.oc(rcloud.available.render.formats),
-        help = make.oc(rcloud.help),
-        get_thumb = make.oc(rcloud.get.thumb),
-        get_fork_count = make.oc(rcloud.get.fork.count)
+        help = make.oc(rcloud.help)
         )
     if (authenticated) c(caps, list(
         compute_init = make.oc(rcloud.compute.init),
@@ -129,6 +127,7 @@ unauthenticated.ocaps <- function(mode, compute)
       load_notebook_compute = compute$load_notebook,
       call_notebook = compute$unauthenticated_call_notebook,
       call_fastrweb_notebook = compute$unauthenticated_call_fastrweb_notebook,
+      get_multiple_notebook_infos = make.oc(rcloud.unauthenticated.get.multiple.notebook.infos),
       notebook_by_name = make.oc(rcloud.unauthenticated.notebook.by.name),
       get_version_by_tag = make.oc(rcloud.get.version.by.tag),
       get_tag_by_version = make.oc(rcloud.get.tag.by.version),
@@ -137,8 +136,8 @@ unauthenticated.ocaps <- function(mode, compute)
       is_notebook_visible = make.oc(rcloud.is.notebook.visible),
       signal_to_compute = make.oc(.signal.to.compute),
       help = compute$help,
-      get_thumb = compute$get_thumb,
-      get_fork_count = compute$get_fork_count,
+      get_fork_count = make.oc(rcloud.unauthenticated.get.fork.count),
+      get_multiple_fork_counts = make.oc(rcloud.unauthenticated.multiple.notebook.fork.counts),
       get_users = make.oc(rcloud.get.users),
 
       # javascript.R
@@ -160,6 +159,7 @@ unauthenticated.ocaps <- function(mode, compute)
         ),
 
       # stars
+      # FIXME: these need unauthenticated versions
       stars=list(
         star_notebook = make.oc(rcloud.star.notebook),
         unstar_notebook = make.oc(rcloud.unstar.notebook),
@@ -168,7 +168,13 @@ unauthenticated.ocaps <- function(mode, compute)
         get_notebook_starrer_list = make.oc(rcloud.notebook.starrer.list),
         get_multiple_notebook_star_counts = make.oc(rcloud.multiple.notebook.star.counts),
         get_my_starred_notebooks = make.oc(rcloud.get.my.starred.notebooks)
-        ),
+      ),
+
+      # discovery
+      discovery=list(
+        get_notebooks = make.oc(rcloud.discovery.unauthenticated.get.notebooks),
+        get_thumb = make.oc(rcloud.discovery.unauthenticated.get.thumb)
+      ),
 
       session_cell_eval = compute$unauthenticated_session_cell_eval,
 
@@ -223,8 +229,8 @@ authenticated.ocaps <- function(mode)
       fork_notebook = make.oc(rcloud.fork.notebook),
       port_notebooks = make.oc(rcloud.port.notebooks),
       notebook_cells = make.oc(rcloud.notebook.cells),
-      get_thumb = make.oc(rcloud.get.thumb),
       get_fork_count = make.oc(rcloud.get.fork.count),
+      get_multiple_fork_counts = make.oc(rcloud.multiple.notebook.fork.counts),
       call_notebook = compute$call_notebook,
       get_completions = compute$get_completions,
 
@@ -270,6 +276,13 @@ authenticated.ocaps <- function(mode)
         delete = make.oc(rcloud.delete.comment)
         ),
 
+      # discovery
+      discovery=list(
+        get_notebooks = make.oc(rcloud.discovery.get.notebooks),
+        get_thumb = make.oc(rcloud.discovery.get.thumb)
+      ),
+
+
       config = list(
         all_notebooks = make.oc(rcloud.config.all.notebooks),
         all_user_notebooks = make.oc(user.all.notebooks),
@@ -281,7 +294,6 @@ authenticated.ocaps <- function(mode)
         set_current_notebook = make.oc(rcloud.config.set.current.notebook),
         new_notebook_number = make.oc(rcloud.config.new.notebook.number),
         get_recent_notebooks = make.oc(rcloud.config.get.recent.notebooks),
-        get_notebooks_discover = make.oc(rcloud.config.get.notebooks.discover),
         set_recent_notebook = make.oc(rcloud.config.set.recent.notebook),
         clear_recent_notebook = make.oc(rcloud.config.clear.recent.notebook),
         get_user_option = make.oc(rcloud.config.get.user.option),

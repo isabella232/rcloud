@@ -1,6 +1,7 @@
 RCloud = {};
 
-// FIXME: what is considered an execption - and API error or also cell eval error? We can tell them apart now ...
+// FIXME: what is considered an exception - an API error or also cell eval error?
+// We can tell them apart now ...
 RCloud.is_exception = function(v) {
     // consider only OCAP errors an exception -- eventually both should use the exception mechanism, though
     return _.isObject(v) && v.r_attributes && v.r_attributes['class'] === 'OCAP-eval-error';
@@ -14,7 +15,9 @@ RCloud.is_exception = function(v) {
 RCloud.exception_message = function(v) {
     if (!RCloud.is_exception(v))
         throw new Error("Not an R exception value");
-    return v['error'];
+    var tb = v['traceback'] ? v['traceback'] : "";
+    if (tb.join) tb = tb.join("\n");
+    return v.error + "R trace:\n" + tb;
 };
 
 //////////////////////////////////////////////////////////////////////////////
@@ -24,9 +27,7 @@ RCloud.promisify_paths = (function() {
     function rcloud_handler(command, promise_fn) {
         function success(result) {
             if(result && RCloud.is_exception(result)) {
-                var tb = result['traceback'] ? result['traceback'] : "";
-                if (tb.join) tb = tb.join("\n");
-                throw new Error(command + ": " + result.error + "R trace:\n" + tb);
+                throw new Error(command + ": " + RCloud.exception_message(result));
             }
             return result;
         }
@@ -112,6 +113,8 @@ RCloud.create = function(rcloud_ocaps) {
             ["stars","get_notebook_starrer_list"],
             ["stars","get_multiple_notebook_star_counts"],
             ["stars","get_my_starred_notebooks"],
+            ["discovery", "get_notebooks"],
+            ["discovery", "get_thumb"],
             ["session_cell_eval"],
             ["reset_session"],
             ["set_device_pixel_ratio"],
@@ -122,16 +125,17 @@ RCloud.create = function(rcloud_ocaps) {
             ["api", "set_url"],
             ["api", "get_url"],
             ["get_notebook_by_name"],
+            ["get_multiple_notebook_infos"],
             ["languages", "get_list"],
             ["plots", "render"],
             ["plots", "get_formats"],
-            ["get_thumb"],
-            ["get_fork_count"]
+            ["get_fork_count"],
+            ["get_multiple_fork_counts"]
         ];
         RCloud.promisify_paths(rcloud_ocaps, paths);
 
-        rcloud.get_thumb = rcloud_ocaps.get_thumbAsync;
         rcloud.get_fork_count = rcloud_ocaps.get_fork_countAsync;
+        rcloud.get_multiple_fork_counts = rcloud_ocaps.get_multiple_fork_countsAsync;
         rcloud.username = function() {
             return $.cookies.get('user');
         };
@@ -299,6 +303,11 @@ RCloud.create = function(rcloud_ocaps) {
             return rcloud_ocaps.stars.get_multiple_notebook_star_countsAsync(id);
         };
 
+        rcloud.discovery = {
+            get_notebooks: rcloud_ocaps.discovery.get_notebooksAsync,
+            get_thumb: rcloud_ocaps.discovery.get_thumbAsync
+        };
+
         rcloud.session_cell_eval = function(context_id, filename, language, version, silent) {
             return rcloud_ocaps.session_cell_evalAsync(context_id, filename, language, version, silent);
         };
@@ -320,6 +329,8 @@ RCloud.create = function(rcloud_ocaps) {
         rcloud.get_notebook_by_name = function(user, path) {
             return rcloud_ocaps.get_notebook_by_nameAsync(user, path);
         };
+
+        rcloud.get_multiple_notebook_infos = rcloud_ocaps.get_multiple_notebook_infosAsync;
 
         ////////////////////////////////////////////////////////////////////////////////
         // access the runtime API in javascript as well
@@ -415,14 +426,12 @@ RCloud.create = function(rcloud_ocaps) {
             ["config", "set_current_notebook"],
             ["config", "new_notebook_number"],
             ["config", "get_recent_notebooks"],
-            ["config", "get_notebooks_discover"],
             ["config", "set_recent_notebook"],
             ["config", "clear_recent_notebook"],
             ["config", "get_user_option"],
             ["config", "set_user_option"],
             ["config", "get_alluser_option"],
             ["get_notebook_info"],
-            ["get_multiple_notebook_infos"],
             ["set_notebook_info"],
             ["get_notebook_property"],
             ["set_notebook_property"],
@@ -602,7 +611,6 @@ RCloud.create = function(rcloud_ocaps) {
             set_current_notebook: rcloud_ocaps.config.set_current_notebookAsync,
             new_notebook_number: rcloud_ocaps.config.new_notebook_numberAsync,
             get_recent_notebooks: rcloud_ocaps.config.get_recent_notebooksAsync,
-            get_notebooks_discover: rcloud_ocaps.config.get_notebooks_discoverAsync,
             set_recent_notebook: rcloud_ocaps.config.set_recent_notebookAsync,
             clear_recent_notebook: rcloud_ocaps.config.clear_recent_notebookAsync,
             get_user_option: rcloud_ocaps.config.get_user_optionAsync,
@@ -612,7 +620,6 @@ RCloud.create = function(rcloud_ocaps) {
 
         // notebook cache
         rcloud.get_notebook_info = rcloud_ocaps.get_notebook_infoAsync;
-        rcloud.get_multiple_notebook_infos = rcloud_ocaps.get_multiple_notebook_infosAsync;
         rcloud.set_notebook_info = function(id, info) {
             if(!info.username) return Promise.reject(new Error("attempt to set info no username"));
             if(!info.description) return Promise.reject(new Error("attempt to set info no description"));
