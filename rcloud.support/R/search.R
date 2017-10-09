@@ -273,7 +273,7 @@ stitch.search.result <- function(splitted, type,k) {
     .solr.post(data=metadata, isXML=TRUE)
 }
 
-rcloud.search.description(description, user = NULL, start = 0, pagesize = 100,
+rcloud.search.description <- function(description, user = NULL, start = 0, pagesize = 100,
                           sortby = "description", orderby = "desc") {
 
   url <- getConf("solr.url")
@@ -284,14 +284,17 @@ rcloud.search.description(description, user = NULL, start = 0, pagesize = 100,
 
   solr.query <- list(
                   q=query,
-                  start=start
+                  start=start,
                   rows=pagesize,
                   indent="true",
                   fl="description,id,user,updated_at,starcount",
                   sort=paste(sortby,orderby)
                 )
   # pass it straight back no post-processing
-  .solr.get(solr.url=url,query=solr.query,
-            solr.auth.user=getConf("solr.auth.user"),
-            solr.auth.pwd=getConf("solr.auth.pwd"))
+  .solr.get(
+    solr.url=url,
+    query=solr.query,
+    solr.auth.user=getConf("solr.auth.user"),
+    solr.auth.pwd=getConf("solr.auth.pwd")
+  )
 }
