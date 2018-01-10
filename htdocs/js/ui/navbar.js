@@ -42,13 +42,28 @@ RCloud.UI.navbar = (function() {
         },
         create_highlight_button: function(id, title, icon) {
             var result = this.create_button(id, title, icon);
-            result.control = $.el.span($.el.span({
-                class: 'button-highlight'
-            }), result.control);
+            result.highlight_color = "#ffee32";
+            result.icon_class = icon;
+            result.highlighted = false;
             result.highlight = function(whether) {
-                $(result.control)
-                    .find('.button-highlight')
-                    .animate({opacity: whether ? 1 : 0}, {duration: 250, queue: false});
+                var that = this;
+                var duration = 900;
+                that.highlighted = whether;
+                function animation_loop() {
+                  var el = $(that.control).find('.' + that.icon_class);
+                  if(that.highlighted) {
+                      if(!el.is(':animated')) {
+                        el.removeAttr('style');
+                        el.animate({color: that.highlight_color}, { duration: duration, queue: false, complete: animation_loop});
+                      }
+                  } else {
+                    el.stop(true, true);
+                    el.removeAttr('style');
+                  }
+                }
+                if(that.highlighted) {
+                  animation_loop();
+                }
                 return this;
             };
             return result;
