@@ -79,10 +79,10 @@ RCloud.UI.import_export = (function() {
                         }
                         function create_import_notebook_dialog() {
                             var body = $('<div class="container"/>').append(
-                                $(['<p>Import notebooks from another GitHub instance.</p><p>Currently import does not preserve history.</p>',
-                                   '<p>source repo api url:&nbsp;<input type="text" class="form-control-ext" id="import-source" style="width:100%;" value="https://api.github.com"></input></td>',
-                                   '<p>notebooks:<br /><textarea class="form-control-ext" style="height: 20%;width: 50%;max-width: 100%" rows="10" cols="30" id="import-gists" form="port"></textarea></p>',
-                                   '<p>prefix (e.g. <code>folder/</code> to put notebooks in a folder):&nbsp;<input type="text" class="form-control-ext" id="import-prefix" style="width:100%;"></input>',
+                                $(['<p>Import Notebooks from another GitHub instance.</p><p>Currently import does not preserve history.</p>',
+                                   '<p>Source Repo API URL:&nbsp;<input type="text" class="form-control-ext" id="import-source" style="width:100%;" value="https://api.github.com"></input></td>',
+                                   '<p>Notebooks:<br /><textarea class="form-control-ext" style="height: 20%;width: 50%;max-width: 100%" rows="10" cols="30" id="import-gists" form="port"></textarea></p>',
+                                   '<p>Prefix (e.g. <code>folder/</code> to put notebooks in a folder):&nbsp;<input type="text" class="form-control-ext" id="import-prefix" style="width:100%;"></input>',
                                    '<p>Notebook Foreign Source:<br /><input type="text" class="form-control-ext" style="width:100%;" list="merge-notebook-gist" /><datalist id="merge-notebook-gist"<option value="gistone"><option value="gisttwo"></datalist></p>'].join('')));
 
                             var cancel = $('<span class="btn btn-cancel">Cancel</span>')
