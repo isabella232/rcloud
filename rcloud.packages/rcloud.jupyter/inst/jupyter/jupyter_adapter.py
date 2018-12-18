@@ -7,6 +7,8 @@ from time import sleep
 import sys
 import os
 import logging
+import json
+import codecs
 from RCloud_ansi2html import ansi2html # MIT license from github:Kronuz/ansi2html (Oct 2014) + rename/our changes
 from xml.sax.saxutils import escape as html_escape # based on reco from moin/EscapingHtml
 import re
@@ -16,6 +18,10 @@ from jupyter_core import paths
 from jupyter_client.kernelspec import KernelSpecManager
 from jupyter_client import MultiKernelManager
 from nbformat.v4 import output_from_msg
+try:
+    from queue import Empty  # Py 3
+except ImportError:
+    from Queue import Empty  # Py 2
 from traitlets import (
     Dict, List, Unicode, Any
 )
@@ -23,27 +29,27 @@ from traitlets import (
 import tempfile
 debugFD, debugFile = "", ""
 
-_debugging = False
+_debugging = True
 if _debugging:
     debugFD, debugFile = tempfile.mkstemp(suffix=".log", prefix="ipy_log")
     logging.basicConfig(filename=debugFile, level=logging.DEBUG)
-    
+
 class NotebookError(Exception):
     pass
-  
-  
+
+
 class CellOutputCollector(object):
     """
     Component that consumes messages produced by kernel and populates cell 'outputs'.
     """
     error_msg = None
-    
+
     def __init__(self, cell = None, cell_index = 0, _display_id_map = Dict()):
       self.cell = cell
       self.outs = cell.outputs = []
       self.cell_index = cell_index
       self._display_id_map = _display_id_map;
-    
+
     def collect(self, msg):
       msg_type = msg['msg_type']
       logging.debug("output: %s", msg_type)
@@ -69,7 +75,7 @@ class CellOutputCollector(object):
         return
       elif msg_type.startswith('comm'):
         return
-            
+
       display_id = None
       if msg_type in {'execute_result', 'display_data', 'update_display_data'}:
         display_id = msg['content'].get('transient', {}).get('display_id', None)
@@ -90,9 +96,9 @@ class CellOutputCollector(object):
         cell_map = self._display_id_map.setdefault(display_id, {})
         output_idx_list = cell_map.setdefault(self.cell_index, [])
         output_idx_list.append(len(self.outs))
-      
+
       self.outs.append(out)
-        
+
     def _update_display_id(self, display_id, msg):
         """Update outputs with a given display_id"""
         if display_id not in self._display_id_map:
@@ -107,7 +113,7 @@ class CellOutputCollector(object):
         except ValueError:
             logging.error("unhandled iopub msg: " + msg['msg_type'])
             return
-        
+
         for cell_idx, output_indices in self._display_id_map[display_id].items():
             cell = self.nb['cells'][cell_idx]
             outputs = cell['outputs']
@@ -128,34 +134,35 @@ def RClansiconv(inputtext, escape=True):
         rettxt = unicode(txt, 'utf-8') # we get unicode characters from IPython sometimes
     except:
         rettxt = txt # if it is already unicode
-        
+
     if _debugging: logging.debug('Unicode: ' + rettxt)
     htmlFragment = ansi2html(rettxt).encode('ascii', 'xmlcharrefreplace')
     output = _textFormatStr.format(htmlFragment.decode("utf-8"))
     if _debugging: logging.debug('Generated html fragment: ' + output)
     return output
-    
+
 class RCloudExecutePreprocessor(ExecutePreprocessor):
     """
     ExecutePreprocessor that manages a pool of reusable kernels.
     """
-    
+
     _kernels = Dict()
     _clients = Dict()
     mkm = None
     _init_scripts = Dict()
     console_in = None
     connection_dir = '/tmp'
-    
+    output_handler = None
+
     def remove_kernel(self, kernel_name):
       if kernel_name in self._kernels:
         kernel_id = self._kernels.pop(kernel_name)
         if kernel_id in self._clients:
           self._clients.pop(kernel_id)
-      
+
     def init_kernel(self, startup_timeout=60, kernel_name=None, **kwargs):
       self.get_kernel(startup_timeout=60, kernel_name=kernel_name, **kwargs)
-      
+
     def start_kernel(self, kernel_name, startup_timeout=60, **kwargs):
       if _debugging: logging.debug('Creating new kernel for name: ' + kernel_name)
       kernel_id = self.mkm.start_kernel(kernel_name = kernel_name, **kwargs)
@@ -178,23 +185,23 @@ class RCloudExecutePreprocessor(ExecutePreprocessor):
         km.shutdown_kernel()
         self.remove_kernel(kernel_name)
         raise
-    
+
     def get_kernel(self, startup_timeout=60, kernel_name=None, **kwargs):
        if self.mkm is None:
          self.mkm = self.kernel_manager_class()
          self.mkm.connection_dir = os.path.join(self.connection_dir)
-       
+
        if _debugging: logging.debug('Kernel connection files are stored in {} '.format(self.mkm.connection_dir))
-       
+
        if kernel_name is None:
          kernel_name = self.kernel_name
 
        if kernel_name in self._kernels and not self.mkm.is_alive(self._kernels[kernel_name]):
          self.remove_kernel(kernel_name)
-      
+
        if not kernel_name in self._kernels:
          return self.start_kernel(kernel_name, startup_timeout = startup_timeout, **kwargs)
-      
+
        kernel_id = self._kernels[kernel_name]
        if _debugging: logging.debug('Reusing existing kernel with id {} for name {} '.format(kernel_id, kernel_name))
        kc = self._clients[kernel_id]
@@ -230,19 +237,19 @@ class RCloudExecutePreprocessor(ExecutePreprocessor):
         path = resources.get('metadata', {}).get('path', '')
         if path == '':
             path = None
-        
+
         # clear display_id map
         self._display_id_map = {}
 
         kernel_name = nb.metadata.get('kernelspec', {}).get('name', self.kernel_name)
-        
+
         self.log.info("Executing notebook with kernel: %s" % kernel_name)
         self.kc = self.get_kernel(
           startup_timeout=self.startup_timeout,
           kernel_name=kernel_name,
           extra_arguments=self.extra_arguments,
           cwd=path)
-        
+
         self.nb = nb
 
         nb, resources = super(ExecutePreprocessor, self).preprocess(nb, resources)
@@ -275,7 +282,25 @@ class RCloudExecutePreprocessor(ExecutePreprocessor):
         # or execution finished while we were reading.
         if not (self.kc.stdin_channel.msg_ready() or self.kc.shell_channel.msg_ready()):
             self.kc.input(raw_data)
-    
+
+    def get_kernel_client(self, kernel_name = None):
+      return self.get_kernel(self.startup_timeout, kernel_name, extra_arguments=self.extra_arguments)
+
+    def get_msg(self, kernel_id, timeout = 30000):
+      kc = self._clients[kernel_id]
+      try:
+        msg = kc.iopub_channel.get_msg(timeout=timeout)
+        msg['channel'] = 'iopub'
+      except Empty:
+        self.log.error(
+            "Timeout waiting for execute reply (%is)." % timeout)
+        msg = None
+      return msg
+
+    def send_msg(self, message, kernel_id):
+      kc = self._clients[kernel_id]
+      kc.shell_channel.send(message)
+
     def complete(self, text, kernel_name = None, pos = None):
       kc = self.get_kernel(self.startup_timeout, kernel_name, extra_arguments=self.extra_arguments)
       try:
@@ -294,31 +319,38 @@ class JupyterAdapter(object):
     # map from kernel types to notebook format types.
 
     MIME_MAP = {
-        'image/jpeg': 'jpeg',
-        'image/png': 'png',
-        'text/plain': 'text',
-        'text/html': 'html',
-        'text/latex': 'latex',
-        'application/javascript': 'html',
-        'application/json': 'json'
+        'image/jpeg': { 'type': 'jpeg' },
+        'image/png': { 'type': 'png' },
+        'text/plain': { 'type': 'text', 'converter': RClansiconv },
+        'text/html': { 'type': 'html'},
+        'text/latex': { 'type': 'latex'},
+        'application/javascript': { 'type': 'html'},
+        'application/json': { 'type': 'json'},
+        'application/vnd.jupyter.widget-view+json': { 'type': 'widget-view+json' }
     }
-    
-    
-    def __init__(self, kernel_startup_timeout, cell_exec_timeout, connection_dir, console_in = None, 
+
+
+    def __init__(self, kernel_startup_timeout, cell_exec_timeout, connection_dir, console_in = None, output_handler = None,
                 kernel_name='python',
                 **kw):
         """Initializes the Jupyter Adapter"""
 
-        self.executePreprocessor = RCloudExecutePreprocessor(startup_timeout = kernel_startup_timeout, timeout = cell_exec_timeout, 
-                                                            kernel_name = kernel_name,  kernel_manager_class=MultiKernelManager, 
-                                                            console_in = console_in, connection_dir = connection_dir, shutdown_kernel = 'immediate')
+        self.executePreprocessor = RCloudExecutePreprocessor(startup_timeout = kernel_startup_timeout, timeout = cell_exec_timeout,
+                                                            kernel_name = kernel_name,  kernel_manager_class=MultiKernelManager,
+                                                            console_in = console_in, output_handler = output_handler, connection_dir = connection_dir, shutdown_kernel = 'immediate')
 
     def add_init_script(self, kernel_name, init_script):
         self.executePreprocessor._init_scripts[kernel_name] = init_script
 
     def get_kernel_specs(self):
         return KernelSpecManager().get_all_specs()
-        
+
+    def get_kernel_id(self, kernel_name):
+        return self.executePreprocessor._kernels[kernel_name]
+
+    def get_kernel(self, kernel_name):
+        return self.executePreprocessor.get_kernel_client(kernel_name)
+
     def get_jupyter_path(self, path):
         return paths.jupyter_path(path)
 
@@ -331,18 +363,41 @@ class JupyterAdapter(object):
     def complete(self, text, kernel_name = None, pos = None):
         return self.executePreprocessor.complete(kernel_name, text, pos)
 
+    def read_msg(self, kernel_id, timeout = 3):
+        if _debugging: logging.info('read_msg kernel: ' + kernel_id)
+        msg = self.executePreprocessor.get_msg(kernel_id, timeout = timeout)
+        if msg != None:
+            if _debugging: logging.info('read_msg kernel: ' + kernel_id + ' msg: ' + msg['msg_id'])
+            # FIXME work in progress solution to issues with handling Python binary views from R, convert the binary data to base64 string
+            # this is a temporary workaround, also it still needs improving.
+            if len(msg['buffers']) > 0:
+                buffers = []
+                for b in msg['buffers']:
+                    if _debugging: logging.info('read_msg: ' + kernel_id + " converting buffer views to arrays.")
+                    buffers.append(codecs.encode(b, 'base64'))
+                msg['buffers'] = buffers
+
+        return msg
+
+    def send_msg(self, msg, kernel_id):
+        if _debugging: logging.info('send_msg: ' + kernel_id)
+        return self.executePreprocessor.send_msg(json.loads(msg), kernel_id)
+
+    def start_kernel(self, kernel_name):
+      self.executePreprocessor.get_kernel_client(kernel_name)
+
     def run_cmd(self, cmd, kernel_name = None):
         """
         Runs python command string.
         """
-        
+
         if _debugging: logging.info('Running command: ' + cmd + ' using kernel: ' + kernel_name)
         notebook = nbformat.v4.new_notebook()
         my_cell = nbformat.v4.new_code_cell(source=cmd)
         notebook.cells = [my_cell]
         if kernel_name:
           notebook.metadata['kernelspec'] = {'name' : kernel_name}
-          
+
         try:
           self.executePreprocessor.preprocess(notebook, {'metadata': {'path': '.' }})
           if _debugging: logging.info('Result notebook: ' + nbformat.v4.writes_json(notebook))
@@ -351,16 +406,16 @@ class JupyterAdapter(object):
           return self.postprocess_output(notebook.cells[0].outputs)
         except:
           exc_type, exc_obj, exc_tb = sys.exc_info()
-          
+
           msg = None
-          if _debugging: 
+          if _debugging:
             msg = '\n'.join(traceback.format_exception_only(exc_type, exc_obj) + traceback.format_tb(exc_tb))
           else:
             msg = '\n'.join(traceback.format_exception_only(exc_type, exc_obj))
-          
+
           out = NotebookNode(output_type = 'error', html = RClansiconv(msg + '\n'))
           return [out]
-          
+
     def postprocess_output(self, outputs):
         """
         Postprocesses output and maps mime types to ones accepted by R.
@@ -373,12 +428,12 @@ class JupyterAdapter(object):
           if msg_type in ('display_data', 'execute_result'):
             for mime, data in content['data'].items():
                 try:
-                    attr = self.MIME_MAP[mime]
-                    if attr == 'text':
-                      tmpval =  RClansiconv(data) 
+                    target = self.MIME_MAP[mime]
+                    if 'converter' in target.keys():
+                      tmpval = target['converter'](data)
                     else:
                       tmpval = data
-                    setattr(out, attr, tmpval)
+                    setattr(out, target['type'], tmpval)
                 except KeyError:
                     raise NotImplementedError('unhandled mime type: %s' % mime)
           elif msg_type == 'stream':
@@ -391,4 +446,3 @@ class JupyterAdapter(object):
           if _debugging: logging.info('Sending: msg_type: [{}]; HTML: [{}]; TEXT: [{}]'.format(msg_type, out.get('html', ''), out.get('text', '') ))
           res.append(out)
         return res # upstream process will handle it [e.g. send as an oob message]
-

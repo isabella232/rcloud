@@ -1,19 +1,19 @@
-#' 
+#'
 #' Configuration
-#' 
+#'
 #' Python version and library path are defined by the following settings from rcloud.conf:
 #'  * rcloud.jupyter.python.path - path to Python installation that should be used
 #'  * rcloud.jupyter.python.extra.libs - additional Python lib directories (e.g. where Jupyter Python modules got installed)
-#'  
+#'
 #' IMPORTANT!!! These two do not affect kernels being used, kernels are configured by kernel descriptors.
-#'  
+#'
 #'  For Jupyter configuration options see https://jupyter.readthedocs.io/en/latest/projects/jupyter-directories.html
-#'  
+#'
 #' Kernels are loaded from the following default locations, if JUPYTER_PATH is not set:
 #' * "/home/<USER_NAME>/.local/share/jupyter/kernels"
 #' * "/usr/local/share/jupyter/kernels"
 #' * "/usr/share/jupyter/kernels"
-#'  
+#'
 PYTHON_PATH <- 'rcloud.jupyter.python.path'
 PYTHON_EXTRA_LIBS <- 'rcloud.jupyter.python.extra.libs'
 JUPYTER_CELL_EXEC_TIMEOUT <- 'rcloud.jupyter.cell.exec.timeout'
@@ -49,7 +49,7 @@ JUPYTER_CONNECTION_DIR_PATH <- 'rcloud.jupyter.connection_dir.path'
 
 .load.mapping.from.kernel.metadata <- function(kernel_spec) {
   rcloud.metadata <- kernel_spec$metadata[grep("^rcloud\\..*", names(kernel_spec$metadata))]
-  if(is.null(rcloud.metadata)) { 
+  if(is.null(rcloud.metadata)) {
     return(list())
   }
   names(rcloud.metadata) <- sub("^rcloud\\.", "", names(rcloud.metadata))
@@ -80,12 +80,12 @@ JUPYTER_CONNECTION_DIR_PATH <- 'rcloud.jupyter.connection_dir.path'
     "init.script" = "function (session) { '' }"
   )
   language <- spec$language
-  
+
   defaultLangDefinition <- .replace.null.with.empty.list(defaultMapping[['languages']][[language]])
   customLangDefinition <- .replace.null.with.empty.list(customMapping[['languages']][[language]])
   defaultKernelMapping <- .replace.null.with.empty.list(defaultMapping[['kernelMapping']][[kernel_name]])
   customKernelMapping <- .replace.null.with.empty.list(customMapping[['kernelMapping']][[kernel_name]])
-  
+
   defaultLangMapping <- .merge.lists(defaultLangDefinition, defaultKernelMapping)
   customLangMapping <- .merge.lists(customLangDefinition, customKernelMapping)
   for(key in names(res)) {
@@ -99,7 +99,7 @@ JUPYTER_CONNECTION_DIR_PATH <- 'rcloud.jupyter.connection_dir.path'
     } else if(!is.null(fromDefault) && nchar(fromDefault)>0) {
       res[key] <- fromDefault
     }
-    
+
     if(!nchar(res[key]) > 0) {
       stop(paste0("Language definition error: language '", kernel_name,"' property '", key, "' is missing value."))
     }
@@ -109,8 +109,8 @@ JUPYTER_CONNECTION_DIR_PATH <- 'rcloud.jupyter.connection_dir.path'
 
 
 #'
-#' @returnt time in seconds
-#' 
+#' @return time in seconds
+#'
 .get_cell_exec_timeout <- function() {
   if (rcloud.support:::nzConf(JUPYTER_CELL_EXEC_TIMEOUT)) {
     as.integer(rcloud.support:::getConf(JUPYTER_CELL_EXEC_TIMEOUT))
@@ -121,7 +121,7 @@ JUPYTER_CONNECTION_DIR_PATH <- 'rcloud.jupyter.connection_dir.path'
 
 #'
 #' @returnt time in seconds
-#' 
+#'
 .get_cell_startup_timeout <- function() {
   if (rcloud.support:::nzConf(JUPYTER_KERNEL_STARTUP_TIMEOUT)) {
     as.integer(rcloud.support:::getConf(JUPYTER_KERNEL_STARTUP_TIMEOUT))
@@ -132,7 +132,7 @@ JUPYTER_CONNECTION_DIR_PATH <- 'rcloud.jupyter.connection_dir.path'
 
 #'
 #' @returnt connnection dir path
-#' 
+#'
 .get_connection_dir_path <- function() {
   if (rcloud.support:::nzConf(JUPYTER_CONNECTION_DIR_PATH)) {
     rcloud.support:::getConf(JUPYTER_CONNECTION_DIR_PATH)
@@ -156,21 +156,21 @@ JUPYTER_CONNECTION_DIR_PATH <- 'rcloud.jupyter.connection_dir.path'
     sys$path <-c(sys$path, extraLibs)
   }
   sys$path <- c(sys$path, system.file("jupyter", package="rcloud.jupyter"))
-  
+
   jupyter_adapter <- reticulate::import("jupyter_adapter")
-  
+
   runner <- jupyter_adapter$JupyterAdapter(
                                            kernel_startup_timeout = .get_cell_startup_timeout(),
                                            cell_exec_timeout = .get_cell_exec_timeout(),
                                            connection_dir = .get_connection_dir_path(),
-                                           console_in = .console.in.handler, 
+                                           console_in = .console.in.handler,
                                            kernel_name = .get_default_kernel('python')
                                            )
   rcloud.session$jupyter.adapter <- runner
-  
+
   f <- .GlobalEnv$.Rserve.done
   session <- rcloud.session
-  
+
   .GlobalEnv$.Rserve.done <- function(...) {
     tryCatch({
       .stop.jupyter.adapter(session)
@@ -201,54 +201,85 @@ JUPYTER_CONNECTION_DIR_PATH <- 'rcloud.jupyter.connection_dir.path'
 
 .exec.with.jupyter <- function(kernel, cmd, rcloud.session)
 {
-  mime_order <- c("html", "png", "jpeg", "text", "json") # richest representation to poorest [order is debatable!]
-  to.chunk <- function(chunk) {
-    # Handler to convert a chunk of response from Python engine to html to send via oob
-    found_mimes = names(chunk)
-    # Pick first format one in mime_order: hard-coded list; no SVG, no latex/mathjax
-    t = mime_order[mime_order %in% found_mimes][1] # First match in mime_order
-    if (t %in% c("html", "text"))
-      return(c(t, chunk[[t]]))  # we assume text is 'html-escaped and within <pre></pre>'
-    if (t %in% c("png", "jpeg")) {
-      img_data <- paste0("data:image/", t, ";base64,", sub("\\s+$", "", chunk[[t]]))
-      return(c(t, paste0("<img src=\"",  img_data, "\">\n")))
-    }
-    if (t %in% c("json"))
-      return(c(t, paste0('<pre>', jsonlite:::toJSON(chunk[[t]]), '</pre>')))
-  }
-  outputs <- tryCatch({
-    rcloud.session$jupyter.adapter$run_cmd(cmd, kernel_name = kernel)
+  #
+  # mime_order <- c("widget-view+json", "html", "png", "jpeg", "text", "json") # richest representation to poorest [order is debatable!]
+  # to.chunk <- function(chunk) {
+  #   # Handler to convert a chunk of response from Python engine to html to send via oob
+  #   found_mimes = names(chunk)
+  #   # Pick first format one in mime_order: hard-coded list; no SVG, no latex/mathjax
+  #   t = mime_order[mime_order %in% found_mimes][1] # First match in mime_order
+  #   if (t %in% c("html", "text"))
+  #     return(c(t, chunk[[t]]))  # we assume text is 'html-escaped and within <pre></pre>'
+  #   if (t %in% c("png", "jpeg")) {
+  #     img_data <- paste0("data:image/", t, ";base64,", sub("\\s+$", "", chunk[[t]]))
+  #     return(c(t, paste0("<img src=\"",  img_data, "\">\n")))
+  #   }
+  #   if (t %in% c("json"))
+  #     return(c(t, paste0('<pre>', jsonlite:::toJSON(chunk[[t]]), '</pre>')))
+  #   if (t %in% c("widget-view+json"))
+  #     return(c(t, jsonlite:::toJSON(chunk[[t]])))
+  # }
+  # outputs <- tryCatch({
+  #   rcloud.session$jupyter.adapter$run_cmd(cmd, kernel_name = kernel)
+  # }, error=function(e) {
+  #   msg <- e$message
+  #   rcloud.html.out(msg)
+  #   return(structure(list(error=e$message), class='cell-eval-error'))
+  # })
+
+  rcloud.session$jupyter.adapter$start_kernel(kernel)
+
+  kernelId = rcloud.session$jupyter.adapter$get_kernel_id(kernel);
+
+  require(rcloud.ipywidgets)
+
+  rcloud.ipywidgets::ipy.execute(kernel, kernelId, cmd)
+
+  # if(is.null(outputs)) {
+  #   return()
+  # }
+  # if(inherits(outputs, 'cell-eval-error')) {
+  #   return(outputs)
+  # }
+  # processed <- lapply(outputs, function(outval)
+  # {
+  #   outType <- outval$output_type
+  #   res <- to.chunk(outval)
+  #   if ( (res[1] == "text") && (outType == "CONSOLE") ) {
+  #     rcloud.out(res[2])
+  #     return(structure(list(), class='cell-eval-result'))
+  #   } else {
+  #     if( res[1] == "widget-view+json" ) {
+  #       rcloud.ipywidgets::ipy.widget(res[2], kernelId)
+  #     } else {
+  #       rcloud.html.out(res[2])
+  #       if(outType %in% c("error"))
+  #         return(structure(list(error="Cell evaluation error"), class='cell-eval-error'))
+  #     }
+  #   }
+  # })
+  # errors <- Filter(function(x) { inherits(x, 'cell-eval-error') }, processed)
+  # if (length(errors) > 0) {
+  #   return(errors[[1]])
+  # }
+  return(structure(list(), class='cell-eval-result'))
+}
+
+rcloud.jupyter.read.msg <- function(kernelId, rcloud.session, timeout = 3) {
+
+  tryCatch({
+    rcloud.session$jupyter.adapter$read_msg(kernelId, timeout)
   }, error=function(e) {
     msg <- e$message
     rcloud.html.out(msg)
-    return(structure(list(error=e$message), class='cell-eval-error'))
+    return(NULL)
   })
-  
-  if(is.null(outputs)) {
-    return()
-  }
-  if(inherits(outputs, 'cell-eval-error')) {
-    return(outputs)
-  }
-  processed <- lapply(outputs, function(outval) 
-  {
-    outType <- outval$output_type
-    res <- to.chunk(outval)
-    if ( (res[1] == "text") && (outType == "CONSOLE") ) {
-      rcloud.out(res[2])
-      return(structure(list(), class='cell-eval-result'))
-    } else {
-      rcloud.html.out(res[2])
-      if(outType %in% c("error"))
-        return(structure(list(error="Cell evaluation error"), class='cell-eval-error'))
-    }
-  })
-  errors <- Filter(function(x) { inherits(x, 'cell-eval-error') }, processed)
-  if (length(errors) > 0) {
-    return(errors[[1]])
-  }
-  return(structure(list(), class='cell-eval-result'))
 }
+
+rcloud.jupyter.send.msg <- function(message, kernelId, rcloud.session) {
+  rcloud.session$jupyter.adapter$send_msg(message, kernelId)
+}
+
 
 rcloud.jupyter.list.kernel.specs <- function(rcloud.session)
 {
@@ -280,7 +311,7 @@ rcloud.jupyter.list.kernel.specs.for.language <- function(language, rcloud.sessi
     kernel_name = kernel_name
   )
   function(text, pos, thissession) {
-    
+
     exp <- tryCatch(
       {
         if (is.null(thissession$jupyter.adapter))
@@ -295,26 +326,26 @@ rcloud.jupyter.list.kernel.specs.for.language <- function(language, rcloud.sessi
         res$position <- completions$cursor_start
         return(res)
       }, error=function(o) structure(list(error=o$message), class="cell-complete-error"))
-    
+
     result <- if (!inherits(exp, "cell-complete-error")) exp else list()
     return(result)
   }
 }
 
 .init.language <- function(kernel_name, kernel_spec, rcloud.session) {
-  
+
   language_descriptor <- list(
     settings = .create.language.settings(kernel_name, kernel_spec),
     run.cell = .jupyter.cell.runner.factory(kernel_name),
     complete = .jupyter.completer.factory(kernel_name)
   )
-  
+
   init.script.builder <- eval(parse(text=language_descriptor$settings$init.script))
-  
+
   init.script <- init.script.builder(rcloud.session)
-  
+
   rcloud.session$jupyter.adapter$add_init_script(kernel_name, init.script)
-  
+
   RCloudLanguage(list(language=language_descriptor$settings$display.name,
                       run.cell=language_descriptor$run.cell,
                       complete=language_descriptor$complete,
@@ -329,9 +360,9 @@ rcloud.language.support <- function(rcloud.session)
 {
   kernel.specs <- rcloud.jupyter.list.kernel.specs(rcloud.session)
   languages <- lapply(names(kernel.specs), function(kernel_name, kernel_specs, rcloud.session) {
-    
+
     lang <- tryCatch({.init.language(kernel_name, kernel_specs[[kernel_name]]$spec, rcloud.session)}, error = function(o) structure(list(error=o$message), class="language-init-error"))
-    
+
     if(inherits(lang, "language-init-error")) {
       warning(lang$error)
     }
